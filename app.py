@@ -23,7 +23,7 @@ class Message(db.Model):
     user = db.relationship('User')
 
 # Initialize database
-@app.before_first_request
+@app.before_request
 def create_tables():
     db.create_all()
 
