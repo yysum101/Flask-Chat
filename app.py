@@ -3,9 +3,11 @@ from flask import Flask, render_template_string, request, redirect, url_for, ses
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 
+# Flask app
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "supersecretkey")
-# Use NeonDB connection or fallback to local SQLite
+
+# Database (NeonDB URL or fallback SQLite)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///chatterbox.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
@@ -22,12 +24,12 @@ class Message(db.Model):
     content = db.Column(db.Text, nullable=False)
     user = db.relationship('User')
 
-# Initialize database
-@app.before_request
+# Initialize DB
+@app.before_first_request
 def create_tables():
     db.create_all()
 
-# Base template
+# Base layout
 layout = """
 <!doctype html>
 <html lang="en">
@@ -69,11 +71,10 @@ textarea { resize: none; }
     {% endfor %}
   {% endif %}
 {% endwith %}
-{% block content %}{% endblock %}
+{{ content|safe }}
 </div>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-// Auto-scroll chat
 var chatBox = document.querySelector('.chat-box');
 if(chatBox){ chatBox.scrollTop = chatBox.scrollHeight; }
 </script>
@@ -99,22 +100,21 @@ def register():
             flash("Username already exists", "danger")
             return redirect(url_for('register'))
         hashed = generate_password_hash(password)
-        new_user = User(username=username, password=hashed)
-        db.session.add(new_user)
+        db.session.add(User(username=username, password=hashed))
         db.session.commit()
         flash("Registration successful! Please log in.", "success")
         return redirect(url_for('login'))
-    return render_template_string(layout + """
-{% block content %}
-<h2>Register</h2>
-<form method="post">
-<div class="mb-3"><label>Username</label><input class="form-control" type="text" name="username" required></div>
-<div class="mb-3"><label>Password</label><input class="form-control" type="password" name="password" required></div>
-<div class="mb-3"><label>Confirm Password</label><input class="form-control" type="password" name="confirm" required></div>
-<button class="btn btn-primary">Register</button>
-</form>
-{% endblock %}
-""", title="Register")
+
+    content = """
+    <h2>Register</h2>
+    <form method="post">
+      <div class="mb-3"><label>Username</label><input class="form-control" type="text" name="username" required></div>
+      <div class="mb-3"><label>Password</label><input class="form-control" type="password" name="password" required></div>
+      <div class="mb-3"><label>Confirm Password</label><input class="form-control" type="password" name="confirm" required></div>
+      <button class="btn btn-primary">Register</button>
+    </form>
+    """
+    return render_template_string(layout, title="Register", content=content)
 
 @app.route('/login', methods=['GET','POST'])
 def login():
@@ -129,16 +129,16 @@ def login():
             return redirect(url_for('chat'))
         flash("Invalid credentials", "danger")
         return redirect(url_for('login'))
-    return render_template_string(layout + """
-{% block content %}
-<h2>Login</h2>
-<form method="post">
-<div class="mb-3"><label>Username</label><input class="form-control" type="text" name="username" required></div>
-<div class="mb-3"><label>Password</label><input class="form-control" type="password" name="password" required></div>
-<button class="btn btn-primary">Login</button>
-</form>
-{% endblock %}
-""", title="Login")
+
+    content = """
+    <h2>Login</h2>
+    <form method="post">
+      <div class="mb-3"><label>Username</label><input class="form-control" type="text" name="username" required></div>
+      <div class="mb-3"><label>Password</label><input class="form-control" type="password" name="password" required></div>
+      <button class="btn btn-primary">Login</button>
+    </form>
+    """
+    return render_template_string(layout, title="Login", content=content)
 
 @app.route('/logout')
 def logout():
@@ -151,30 +151,31 @@ def chat():
     if 'user_id' not in session:
         flash("Please log in first", "danger")
         return redirect(url_for('login'))
+
     if request.method == 'POST':
-        content = request.form['content']
-        if content.strip():
-            msg = Message(user_id=session['user_id'], content=content.strip())
-            db.session.add(msg)
+        content_text = request.form['content'].strip()
+        if content_text:
+            db.session.add(Message(user_id=session['user_id'], content=content_text))
             db.session.commit()
         return redirect(url_for('chat'))
+
     messages = Message.query.order_by(Message.id.asc()).all()
-    return render_template_string(layout + """
-{% block content %}
-<h2>Chat Room</h2>
-<div class="mb-3">
-<form method="post">
-<textarea class="form-control mb-2" name="content" placeholder="Type a message..." required></textarea>
-<button class="btn btn-primary">Send</button>
-</form>
-</div>
-<div class="chat-box">
-{% for msg in messages %}
-<div class="message"><strong>{{ msg.user.username }}:</strong> {{ msg.content }}</div>
-{% endfor %}
-</div>
-{% endblock %}
-""", title="Chat", messages=messages)
+    chat_html = """
+    <h2>Chat Room</h2>
+    <div class="mb-3">
+      <form method="post">
+        <textarea class="form-control mb-2" name="content" placeholder="Type a message..." required></textarea>
+        <button class="btn btn-primary">Send</button>
+      </form>
+    </div>
+    <div class="chat-box">
+    """
+    for msg in messages:
+        chat_html += f'<div class="message"><strong>{msg.user.username}:</strong> {msg.content}</div>'
+    chat_html += "</div>"
+
+    return render_template_string(layout, title="Chat", content=chat_html)
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
